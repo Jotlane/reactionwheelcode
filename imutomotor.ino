@@ -30,18 +30,19 @@
 */
 
 /* Set the delay between fresh samples */
-uint16_t BNO055_SAMPLERATE_DELAY_MS = 100;
+uint16_t BNO055_SAMPLERATE_DELAY_MS = 10;//changed the delay here from 100 to 10 (10Hz to 100Hz), if anything goes wrong change back to 100ms delay
 
 // Check I2C device address and correct line below (by default address is 0x29 or 0x28)
 //                                   id, address
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);
 
 double Setpoint, Input, Output;
-double Kp=1, Ki=0, Kd=0;//2,5,1
+double Kp=3, Ki=0, Kd=0;//2,5,1
 
 PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
-
-
+bool coas = false;
+float timer = 0;
+bool timer_start = false;
 VescUart UART;
 
 void setup(void)
@@ -53,7 +54,7 @@ void setup(void)
   /** Define which ports to use as UART */
   UART.setSerialPort(&Serial1);
   
-  while (!Serial) delay(10);  // wait for serial port to open!
+  //while (!Serial) delay(10);  // wait for serial port to open!
 
   Serial.println("Orientation Sensor Test"); Serial.println("");
 
@@ -74,50 +75,95 @@ void setup(void)
   Output = 0;
   //turn the PID on
   myPID.SetMode(AUTOMATIC);
-  myPID.SetOutputLimits(-3, 3);
+  myPID.SetOutputLimits(-50, 50);
 }
 
 void loop(void)
 {
   //could add VECTOR_ACCELEROMETER, VECTOR_MAGNETOMETER,VECTOR_GRAVITY...
-  sensors_event_t orientationData;
+  sensors_event_t orientationData , angVelocityData , linearAccelData, magnetometerData, accelerometerData, gravityData;
   bno.getEvent(&orientationData, Adafruit_BNO055::VECTOR_EULER);
-//  Serial.print(orientationData.orientation.x);
-
-//  int8_t boardTemp = bno.getTemp();
-//  Serial.println();
-//  Serial.print(F("temperature: "));
-//  Serial.println(boardTemp);
-//
-//  uint8_t system, gyro, accel, mag = 0;
-//  bno.getCalibration(&system, &gyro, &accel, &mag);
-//  Serial.println();
-//  Serial.print("Calibration: Sys=");
-//  Serial.print(system);
-//  Serial.print(" Gyro=");
-//  Serial.print(gyro);
-//  Serial.print(" Accel=");
-//  Serial.print(accel);
-//  Serial.print(" Mag=");
-//  Serial.println(mag);
-//
-//  Serial.println("--");
+  bno.getEvent(&angVelocityData, Adafruit_BNO055::VECTOR_GYROSCOPE);
+  bno.getEvent(&linearAccelData, Adafruit_BNO055::VECTOR_LINEARACCEL);
+  bno.getEvent(&magnetometerData, Adafruit_BNO055::VECTOR_MAGNETOMETER);
+  bno.getEvent(&accelerometerData, Adafruit_BNO055::VECTOR_ACCELEROMETER);
+  bno.getEvent(&gravityData, Adafruit_BNO055::VECTOR_GRAVITY);
   delay(BNO055_SAMPLERATE_DELAY_MS);
 
-  Input = orientationData.orientation.x;
-  Input += 180;
-  if (Input>=360)
+  uint8_t bob, gyro, accel, mag = 0;
+  bno.getCalibration(&bob, &gyro, &accel, &mag);
+//  if (bob != 0)
+//  {
+//    Output = 0;
+//    Serial.println("CALIBRATED,STOP ALL CURRENT");
+//  }
+//  else
+//  {
+    Input = orientationData.orientation.z;
+    Input += 180;
+    if (Input>=360)
+    {
+      Input -=360;
+    }
+    else if (Input<0)
+    {
+      Input += 360;
+    }
+    if (Input > 185 || Input < 175)
+    {
+      myPID.Compute();
+    }
+    else
+    {
+      Output = 0;
+    }
+//  }
+  if ((Input > 185 || Input < 175) && coas == false && timer_start == false)
   {
-    Input -=360;
+    timer = millis();
+    timer_start = true;
   }
-  else if (Input<0)
+  if (millis() > timer + 500)
   {
-    Input += 360;
+    coas = true;
   }
-  myPID.Compute();
+  if (coas == true)
+  {
+    Output = 0;
+  }
+  if (Input < 185 && Input > 175)
+  {
+    coas = false;
+    timer = 0;
+    timer_start = false;
+  }
   Serial.println("Input:");
   Serial.println(Input);
   Serial.println("Output:");
   Serial.println(Output);
+//  Serial.println("Timer: ");
+//  Serial.println(timer);
+//  Serial.println("Coas");
+//  Serial.println(coas);
   UART.setCurrent(Output);
+  Serial.println("System Calibration: ");
+  Serial.println(bob);
+  Serial.println("Accel X: ");
+  Serial.println(accelerometerData.acceleration.x);
+  Serial.println("Accel Y: ");
+  Serial.println(accelerometerData.acceleration.y);
+  Serial.println("Accel Z: ");
+  Serial.println(accelerometerData.acceleration.z);
+  Serial.println("LIN X: ");
+  Serial.println(linearAccelData.acceleration.x);
+  Serial.println("LIN Y: ");
+  Serial.println(linearAccelData.acceleration.y);
+  Serial.println("LIN Z: ");
+  Serial.println(linearAccelData.acceleration.z);
+  Serial.println("ROT X: ");
+  Serial.println(angVelocityData.gyro.x);
+  Serial.println("ROT Y: ");
+  Serial.println(angVelocityData.gyro.y);
+  Serial.println("ROT Z: ");
+  Serial.println(angVelocityData.gyro.z);
 }
